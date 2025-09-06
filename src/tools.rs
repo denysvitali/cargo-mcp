@@ -12,6 +12,9 @@ mcplease::tools!(
     (CargoRemove, cargo_remove, "cargo_remove"),
     (CargoUpdate, cargo_update, "cargo_update"),
     (CargoClean, cargo_clean, "cargo_clean"),
+    (CargoDoc, cargo_doc, "cargo_doc"),
+    (CargoTree, cargo_tree, "cargo_tree"),
+    (CargoFix, cargo_fix, "cargo_fix"),
     (
         SetWorkingDirectory,
         set_working_directory,
