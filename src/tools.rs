@@ -12,10 +12,5 @@ mcplease::tools!(
     (CargoRemove, cargo_remove, "cargo_remove"),
     (CargoUpdate, cargo_update, "cargo_update"),
     (CargoClean, cargo_clean, "cargo_clean"),
-    (
-        SetWorkingDirectory,
-        set_working_directory,
-        "set_working_directory"
-    ),
     (CargoRun, cargo_run, "cargo_run")
 );

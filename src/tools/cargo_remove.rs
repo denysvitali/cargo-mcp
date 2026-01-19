@@ -79,11 +79,11 @@ impl Tool<CargoTools> for CargoRemove {
             return Err(anyhow!("No dependencies specified"));
         }
 
-        let project_path = state.ensure_rust_project(None)?;
-        
+        let project_path = state.ensure_rust_project()?;
+
         // Use toolchain from args, session default, or none
         let toolchain = self.toolchain
-            .or_else(|| state.get_default_toolchain(None).unwrap_or(None));
+            .or_else(|| state.get_default_toolchain().unwrap_or(None));
 
 
         let mut args = vec!["remove"];
@@ -102,6 +102,6 @@ impl Tool<CargoTools> for CargoRemove {
         }
 
         let cmd = create_cargo_command(&args, toolchain.as_deref(), self.cargo_env.as_ref());
-        execute_cargo_command(cmd, &project_path, "cargo remove")
+        execute_cargo_command(cmd, &project_path, "cargo remove", None)
     }
 }

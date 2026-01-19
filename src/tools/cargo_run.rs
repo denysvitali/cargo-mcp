@@ -1,15 +1,23 @@
 use crate::state::CargoTools;
-use crate::tools::cargo_utils::{create_cargo_command, execute_cargo_command};
+use crate::tools::cargo_utils::{
+    create_cargo_command, execute_cargo_command, wrap_command_for_pty,
+};
 use anyhow::Result;
 use mcplease::traits::{Tool, WithExamples};
 use mcplease::types::Example;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Run a binary or example from the current package
 #[derive(Default, Debug, Serialize, Deserialize, schemars::JsonSchema, clap::Args)]
 #[serde(rename = "cargo_run")]
 pub struct CargoRun {
+    /// Path to the project directory (containing Cargo.toml)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub path: Option<String>,
+
     /// Optional package name to run from (for workspaces)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(long)]
@@ -55,10 +63,20 @@ pub struct CargoRun {
     #[arg(long)]
     pub toolchain: Option<String>,
 
+    /// Optional timeout in seconds (default: 120)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long)]
+    pub timeout: Option<u64>,
+
     /// Optional environment variables to set for the cargo command
     #[serde(skip_serializing_if = "Option::is_none")]
     #[arg(skip)]
     pub cargo_env: Option<HashMap<String, String>>,
+
+    /// Raw cargo arguments as a single string (e.g., "--release --bin my-bin -- --arg1")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[arg(long, hide = true)]
+    pub raw_args: Option<String>,
 }
 
 impl WithExamples for CargoRun {
@@ -72,6 +90,7 @@ impl WithExamples for CargoRun {
                 description: "Run a specific binary",
                 item: Self {
                     bin: Some("my-binary".into()),
+                    timeout: Some(120),
                     ..Self::default()
                 },
             },
@@ -79,6 +98,7 @@ impl WithExamples for CargoRun {
                 description: "Run an example",
                 item: Self {
                     example: Some("hello".into()),
+                    timeout: Some(120),
                     ..Self::default()
                 },
             },
@@ -86,6 +106,7 @@ impl WithExamples for CargoRun {
                 description: "Run with arguments passed to the binary",
                 item: Self {
                     args: Some(vec!["--verbose".into(), "input.txt".into()]),
+                    timeout: Some(120),
                     ..Self::default()
                 },
             },
@@ -94,6 +115,7 @@ impl WithExamples for CargoRun {
                 item: Self {
                     release: Some(true),
                     features: Some("feature1 feature2".into()),
+                    timeout: Some(120),
                     ..Self::default()
                 },
             },
@@ -103,6 +125,25 @@ impl WithExamples for CargoRun {
                     package: Some("my-workspace-crate".into()),
                     bin: Some("worker".into()),
                     args: Some(vec!["--config".into(), "prod.toml".into()]),
+                    timeout: Some(120),
+                    ..Self::default()
+                },
+            },
+            Example {
+                description: "Run with custom timeout (60 seconds)",
+                item: Self {
+                    bin: Some("gps-tracker-tr003-v2".into()),
+                    release: Some(true),
+                    features: Some("no-battery".into()),
+                    timeout: Some(60),
+                    ..Self::default()
+                },
+            },
+            Example {
+                description: "Run with raw cargo arguments string",
+                item: Self {
+                    raw_args: Some("--release --bin gps-tracker-tr003-v2 -- --some-arg".into()),
+                    timeout: Some(120),
                     ..Self::default()
                 },
             },
@@ -112,12 +153,19 @@ impl WithExamples for CargoRun {
 
 impl Tool<CargoTools> for CargoRun {
     fn execute(self, state: &mut CargoTools) -> Result<String> {
-        let project_path = state.ensure_rust_project(None)?;
+        let project_path = if let Some(ref path) = self.path {
+            PathBuf::from(path)
+        } else {
+            state.ensure_rust_project()?
+        };
 
         // Use toolchain from args, session default, or none
         let toolchain = self
             .toolchain
-            .or_else(|| state.get_default_toolchain(None).unwrap_or(None));
+            .or_else(|| state.get_default_toolchain().unwrap_or(None));
+
+        // Use provided timeout or default to 120 seconds (2 minutes)
+        let timeout_secs = self.timeout.or(Some(120));
 
         let mut args = vec!["run"];
 
@@ -149,6 +197,10 @@ impl Tool<CargoTools> for CargoRun {
             args.push("--no-default-features");
         }
 
+        if let Some(ref raw_args) = self.raw_args {
+            args.extend(raw_args.split_whitespace().map(|s| s as &str));
+        }
+
         // Add separator and binary arguments if provided
         if let Some(ref binary_args) = self.args
             && !binary_args.is_empty()
@@ -159,7 +211,10 @@ impl Tool<CargoTools> for CargoRun {
             }
         }
 
-        let cmd = create_cargo_command(&args, toolchain.as_deref(), self.cargo_env.as_ref());
-        execute_cargo_command(cmd, &project_path, "cargo run")
+        let mut cmd = create_cargo_command(&args, toolchain.as_deref(), self.cargo_env.as_ref());
+
+        wrap_command_for_pty(&mut cmd, &project_path);
+
+        execute_cargo_command(cmd, &project_path, "cargo run", timeout_secs)
     }
 }
